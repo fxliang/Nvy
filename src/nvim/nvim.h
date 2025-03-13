@@ -1,4 +1,5 @@
 #pragma once
+#include <pch.h>
 
 enum NvimRequest : uint8_t {
 	vim_get_api_info = 0,

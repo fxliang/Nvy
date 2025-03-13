@@ -1,4 +1,5 @@
 #pragma once
+#include <pch.h>
 
 constexpr const char *DEFAULT_FONT = "Consolas";
 constexpr float DEFAULT_FONT_SIZE = 14.0f;
