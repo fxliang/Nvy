@@ -19,7 +19,7 @@ jobs:
     steps:
     
       - name: Checkout last commit
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: true
     
@@ -61,7 +61,7 @@ jobs:
 
       # for !tags
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: ${{ startsWith(github.ref, 'refs/heads/') && success() }}
         with:
           if-no-files-found: error
