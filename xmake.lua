@@ -1,5 +1,6 @@
 add_rules("mode.release", "mode.debug")
 set_languages("c++20")
+set_runtimes(is_mode("release") and "MT" or "MTd")
 
 target("Nvy")
   set_kind("binary")

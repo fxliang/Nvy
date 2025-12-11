@@ -44,6 +44,9 @@ target_link_libraries(Nvy PUBLIC
     Dwmapi.lib
     imm32.lib
 )
+# set Nvy to use the multi-threaded runtime library
+set_property(TARGET Nvy PROPERTY
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 target_precompile_headers(Nvy PUBLIC
     <cassert>
