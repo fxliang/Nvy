@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cwchar>
+#include <memory>
+#include <wrl/client.h>
 #include <windows.h>
 #include <d3d11_4.h>
 #include <d2d1_3.h>
@@ -16,3 +18,4 @@
 #include "common/mpack_helper.h"
 #include "common/vec.h"
 #include "common/window_messages.h"
+using Microsoft::WRL::ComPtr;

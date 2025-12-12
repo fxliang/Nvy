@@ -57,7 +57,7 @@ struct GlyphRenderer : public IDWriteTextRenderer {
 	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv_object) noexcept override;
 
 	ULONG ref_count;
-	ID2D1SolidColorBrush *drawing_effect_brush;
-	ID2D1SolidColorBrush *temp_brush;
+	ComPtr<ID2D1SolidColorBrush> drawing_effect_brush;
+	ComPtr<ID2D1SolidColorBrush> temp_brush;
 
 };

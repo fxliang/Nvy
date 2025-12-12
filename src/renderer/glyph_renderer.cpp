@@ -18,14 +18,15 @@ HRESULT GlyphDrawingEffect::QueryInterface(REFIID riid, void **ppv_object) noexc
 }
 
 GlyphRenderer::GlyphRenderer(Renderer *renderer) : ref_count(0) {
-	WIN_CHECK(renderer->d2d_context->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &drawing_effect_brush));
-	WIN_CHECK(renderer->d2d_context->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &temp_brush));
+	WIN_CHECK(renderer->d2d_context->CreateSolidColorBrush(
+		D2D1::ColorF(D2D1::ColorF::Black),
+		drawing_effect_brush.GetAddressOf()));
+	WIN_CHECK(renderer->d2d_context->CreateSolidColorBrush(
+		D2D1::ColorF(D2D1::ColorF::Black),
+		temp_brush.GetAddressOf()));
 }
 
-GlyphRenderer::~GlyphRenderer() {
-	SafeRelease(&drawing_effect_brush);
-	SafeRelease(&temp_brush);
-}
+GlyphRenderer::~GlyphRenderer() = default;
 
 HRESULT GlyphRenderer::DrawGlyphRun(void *client_drawing_context, float baseline_origin_x, 
 	float baseline_origin_y, DWRITE_MEASURING_MODE measuring_mode, DWRITE_GLYPH_RUN const *glyph_run, 
@@ -36,10 +37,9 @@ HRESULT GlyphRenderer::DrawGlyphRun(void *client_drawing_context, float baseline
 	
 	if (client_drawing_effect)
 	{
-		GlyphDrawingEffect *drawing_effect;
-		client_drawing_effect->QueryInterface(__uuidof(GlyphDrawingEffect), reinterpret_cast<void **>(&drawing_effect));
+		ComPtr<GlyphDrawingEffect> drawing_effect;
+		client_drawing_effect->QueryInterface(__uuidof(GlyphDrawingEffect), reinterpret_cast<void **>(drawing_effect.GetAddressOf()));
 		drawing_effect_brush->SetColor(D2D1::ColorF(drawing_effect->text_color));
-		SafeRelease(&drawing_effect);
 	}
 	else {
 		drawing_effect_brush->SetColor(D2D1::ColorF(renderer->hl_attribs[0].foreground));
@@ -55,23 +55,25 @@ HRESULT GlyphRenderer::DrawGlyphRun(void *client_drawing_context, float baseline
 		DWRITE_GLYPH_IMAGE_FORMATS_TIFF |
 		DWRITE_GLYPH_IMAGE_FORMATS_PREMULTIPLIED_B8G8R8A8;
 
-	IDWriteColorGlyphRunEnumerator1 *glyph_run_enumerator;
+	D2D1_POINT_2F baseline_origin;
+	baseline_origin.x = baseline_origin_x;
+	baseline_origin.y = baseline_origin_y;
+	ComPtr<IDWriteColorGlyphRunEnumerator1> glyph_run_enumerator;
 	hr = renderer->dwrite_factory->TranslateColorGlyphRun(
-		D2D1_POINT_2F { .x = baseline_origin_x, .y = baseline_origin_y },
+		baseline_origin,
 		glyph_run,
 		glyph_run_description,
 		supported_formats,
 		measuring_mode,
 		nullptr,
 		0,
-		&glyph_run_enumerator
+		glyph_run_enumerator.GetAddressOf()
 	);
-
 	if (hr == DWRITE_E_NOCOLOR) {
 		renderer->d2d_context->DrawGlyphRun(
-			D2D1_POINT_2F { .x = baseline_origin_x, .y = baseline_origin_y },
+			baseline_origin,
 			glyph_run,
-			drawing_effect_brush,
+			drawing_effect_brush.Get(),
 			measuring_mode
 		);
 	}
@@ -88,10 +90,9 @@ HRESULT GlyphRenderer::DrawGlyphRun(void *client_drawing_context, float baseline
 			DWRITE_COLOR_GLYPH_RUN1 const *color_run;
 			WIN_CHECK(glyph_run_enumerator->GetCurrentRun(&color_run));
 
-			D2D1_POINT_2F current_baseline_origin {
-				.x = color_run->baselineOriginX,
-				.y = color_run->baselineOriginY
-			};
+			D2D1_POINT_2F current_baseline_origin;
+			current_baseline_origin.x = color_run->baselineOriginX;
+			current_baseline_origin.y = color_run->baselineOriginY;
 
 			switch (color_run->glyphImageFormat) {
 			case DWRITE_GLYPH_IMAGE_FORMATS_PNG:
@@ -109,7 +110,7 @@ HRESULT GlyphRenderer::DrawGlyphRun(void *client_drawing_context, float baseline
 				renderer->d2d_context->DrawSvgGlyphRun(
 					current_baseline_origin,
 					&color_run->glyphRun,
-					drawing_effect_brush,
+					drawing_effect_brush.Get(),
 					nullptr,
 					0,
 					measuring_mode
@@ -124,20 +125,20 @@ HRESULT GlyphRenderer::DrawGlyphRun(void *client_drawing_context, float baseline
 					temp_brush->SetColor(color_run->runColor);
 				}
 				
+				D2D1_RECT_F clip_rect;
+				clip_rect.left = current_baseline_origin.x;
+				clip_rect.top = current_baseline_origin.y - renderer->font_ascent;
+				clip_rect.right = current_baseline_origin.x + (color_run->glyphRun.glyphCount * 2 * renderer->font_width);
+				clip_rect.bottom = current_baseline_origin.y + renderer->font_descent;
 				renderer->d2d_context->PushAxisAlignedClip(
-					D2D1_RECT_F {
-						.left = current_baseline_origin.x,
-						.top = current_baseline_origin.y - renderer->font_ascent,
-						.right = current_baseline_origin.x + (color_run->glyphRun.glyphCount * 2 * renderer->font_width),
-						.bottom = current_baseline_origin.y + renderer->font_descent,
-					},
+					clip_rect,
 					D2D1_ANTIALIAS_MODE_ALIASED
 				);
 				renderer->d2d_context->DrawGlyphRun(
 					current_baseline_origin,
 					&color_run->glyphRun,
 					color_run->glyphRunDescription,
-					use_palette_color ? temp_brush : drawing_effect_brush,
+					use_palette_color ? temp_brush.Get() : drawing_effect_brush.Get(),
 					measuring_mode
 				);
 				renderer->d2d_context->PopAxisAlignedClip();
@@ -163,25 +164,23 @@ HRESULT GlyphRenderer::DrawLine(void *client_drawing_context, float baseline_ori
 
 	if (client_drawing_effect)
 	{
-		GlyphDrawingEffect *drawing_effect;
-		client_drawing_effect->QueryInterface(__uuidof(GlyphDrawingEffect), reinterpret_cast<void **>(&drawing_effect));
+		ComPtr<GlyphDrawingEffect> drawing_effect;
+		client_drawing_effect->QueryInterface(__uuidof(GlyphDrawingEffect), reinterpret_cast<void **>(drawing_effect.GetAddressOf()));
 		uint32_t line_color = use_special_color ? drawing_effect->special_color : drawing_effect->text_color;
 		temp_brush->SetColor(D2D1::ColorF(line_color));
-		SafeRelease(&drawing_effect);
 	}
 	else {
 		uint32_t line_color = use_special_color ? renderer->hl_attribs[0].special : renderer->hl_attribs[0].foreground;
 		temp_brush->SetColor(D2D1::ColorF(line_color));
 	} 
 
-	D2D1_RECT_F rect = D2D1_RECT_F {
-		.left = baseline_origin_x,
-		.top = baseline_origin_y + offset,
-		.right = baseline_origin_x + width,
-		.bottom = baseline_origin_y + offset + max(thickness, 1.0f)
-	};
+	D2D1_RECT_F rect;
+	rect.left = baseline_origin_x;
+	rect.top = baseline_origin_y + offset;
+	rect.right = baseline_origin_x + width;
+	rect.bottom = baseline_origin_y + offset + max(thickness, 1.0f);
 
-    renderer->d2d_context->FillRectangle(rect, temp_brush);
+	renderer->d2d_context->FillRectangle(rect, temp_brush.Get());
 	return hr;
 }
 

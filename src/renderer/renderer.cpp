@@ -7,7 +7,8 @@ void InitializeD2D(Renderer *renderer) {
 	options.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
 #endif
 
-	WIN_CHECK(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, options, &renderer->d2d_factory));
+	renderer->d2d_factory.Reset();
+	WIN_CHECK(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, options, renderer->d2d_factory.GetAddressOf()));
 }
 
 void InitializeD3D(Renderer *renderer) {
@@ -17,8 +18,8 @@ void InitializeD3D(Renderer *renderer) {
 #endif
 
 	// Force DirectX 11.1
-	ID3D11Device *temp_device;
-	ID3D11DeviceContext *temp_context;
+	ComPtr<ID3D11Device> temp_device;
+	ComPtr<ID3D11DeviceContext> temp_context;
 	D3D_FEATURE_LEVEL feature_levels[] = { 
 		D3D_FEATURE_LEVEL_11_1,         
 		D3D_FEATURE_LEVEL_11_0,
@@ -29,27 +30,31 @@ void InitializeD3D(Renderer *renderer) {
 		D3D_FEATURE_LEVEL_9_1 
 	};
 	WIN_CHECK(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, feature_levels,
-		ARRAYSIZE(feature_levels), D3D11_SDK_VERSION, &temp_device, &renderer->d3d_feature_level, &temp_context));
-	WIN_CHECK(temp_device->QueryInterface(__uuidof(ID3D11Device2), reinterpret_cast<void **>(&renderer->d3d_device)));
-	WIN_CHECK(temp_context->QueryInterface(__uuidof(ID3D11DeviceContext2), reinterpret_cast<void **>(&renderer->d3d_context)));
+		ARRAYSIZE(feature_levels), D3D11_SDK_VERSION, temp_device.GetAddressOf(), &renderer->d3d_feature_level, temp_context.GetAddressOf()));
+	WIN_CHECK(temp_device.As(&renderer->d3d_device));
+	WIN_CHECK(temp_context.As(&renderer->d3d_context));
 
-	IDXGIDevice3 *dxgi_device;
-	WIN_CHECK(renderer->d3d_device->QueryInterface(__uuidof(IDXGIDevice3), reinterpret_cast<void **>(&dxgi_device)));
-	WIN_CHECK(renderer->d2d_factory->CreateDevice(dxgi_device, &renderer->d2d_device));
-	WIN_CHECK(renderer->d2d_device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_ENABLE_MULTITHREADED_OPTIMIZATIONS, &renderer->d2d_context));
-	WIN_CHECK(renderer->d2d_context->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &renderer->d2d_background_rect_brush));
-
-	SafeRelease(&dxgi_device);
+	ComPtr<IDXGIDevice3> dxgi_device;
+	WIN_CHECK(renderer->d3d_device.As(&dxgi_device));
+	WIN_CHECK(renderer->d2d_factory->CreateDevice(dxgi_device.Get(), renderer->d2d_device.GetAddressOf()));
+	WIN_CHECK(renderer->d2d_device->CreateDeviceContext(
+		D2D1_DEVICE_CONTEXT_OPTIONS_ENABLE_MULTITHREADED_OPTIMIZATIONS,
+		renderer->d2d_context.GetAddressOf()));
+	WIN_CHECK(renderer->d2d_context->CreateSolidColorBrush(
+		D2D1::ColorF(D2D1::ColorF::Black),
+		renderer->d2d_background_rect_brush.GetAddressOf()));
 }
 
 void InitializeDWrite(Renderer *renderer) {
-	WIN_CHECK(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory4), reinterpret_cast<IUnknown **>(&renderer->dwrite_factory)));
+	renderer->dwrite_factory.Reset();
+	WIN_CHECK(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory4), reinterpret_cast<IUnknown **>(renderer->dwrite_factory.GetAddressOf())));
 	if(renderer->disable_ligatures) {
-		WIN_CHECK(renderer->dwrite_factory->CreateTypography(&renderer->dwrite_typography));
-		WIN_CHECK(renderer->dwrite_typography->AddFontFeature(DWRITE_FONT_FEATURE {
-			.nameTag = DWRITE_FONT_FEATURE_TAG_STANDARD_LIGATURES,
-			.parameter = 0		
-		}));
+		renderer->dwrite_typography.Reset();
+		WIN_CHECK(renderer->dwrite_factory->CreateTypography(renderer->dwrite_typography.GetAddressOf()));
+		DWRITE_FONT_FEATURE feature {};
+		feature.nameTag = DWRITE_FONT_FEATURE_TAG_STANDARD_LIGATURES;
+		feature.parameter = 0;
+		WIN_CHECK(renderer->dwrite_typography->AddFontFeature(feature));
 	}
 }
 
@@ -69,7 +74,7 @@ void InitializeWindowDependentResources(Renderer *renderer, uint32_t width, uint
 	renderer->d3d_context->Flush();
 
 	if (renderer->dxgi_swapchain) {
-		renderer->d2d_target_bitmap->Release();
+		renderer->d2d_target_bitmap.Reset();
 
 		HRESULT hr = renderer->dxgi_swapchain->ResizeBuffers(
 			2,
@@ -84,78 +89,65 @@ void InitializeWindowDependentResources(Renderer *renderer, uint32_t width, uint
 		}
 	}
 	else {
-		DXGI_SWAP_CHAIN_DESC1 swapchain_desc {
-			.Width = width,
-			.Height = height,
-			.Format = DXGI_FORMAT_B8G8R8A8_UNORM,
-			.SampleDesc = {
-				.Count = 1,
-				.Quality = 0
-			},
-			.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
-			.BufferCount = 2,
-			.Scaling = DXGI_SCALING_NONE,
-			.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
-			.AlphaMode = DXGI_ALPHA_MODE_IGNORE,
-			.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING
-		};
+		DXGI_SWAP_CHAIN_DESC1 swapchain_desc {};
+		swapchain_desc.Width = width;
+		swapchain_desc.Height = height;
+		swapchain_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+		swapchain_desc.SampleDesc.Count = 1;
+		swapchain_desc.SampleDesc.Quality = 0;
+		swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+		swapchain_desc.BufferCount = 2;
+		swapchain_desc.Scaling = DXGI_SCALING_NONE;
+		swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+		swapchain_desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+		swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-		IDXGIDevice3 *dxgi_device;
-		WIN_CHECK(renderer->d3d_device->QueryInterface(__uuidof(IDXGIDevice3), reinterpret_cast<void **>(&dxgi_device)));
-		IDXGIAdapter *dxgi_adapter;
-		WIN_CHECK(dxgi_device->GetAdapter(&dxgi_adapter));
-		IDXGIFactory2 *dxgi_factory;
+		ComPtr<IDXGIDevice3> dxgi_device;
+		WIN_CHECK(renderer->d3d_device.As(&dxgi_device));
+		ComPtr<IDXGIAdapter> dxgi_adapter;
+		WIN_CHECK(dxgi_device->GetAdapter(dxgi_adapter.GetAddressOf()));
+		ComPtr<IDXGIFactory2> dxgi_factory;
 		WIN_CHECK(dxgi_adapter->GetParent(IID_PPV_ARGS(&dxgi_factory)));
 
-		IDXGISwapChain1 *dxgi_swapchain_temp;
-		WIN_CHECK(dxgi_factory->CreateSwapChainForHwnd(renderer->d3d_device,
-			renderer->hwnd, &swapchain_desc, nullptr, nullptr, &dxgi_swapchain_temp));
+		ComPtr<IDXGISwapChain1> dxgi_swapchain_temp;
+		WIN_CHECK(dxgi_factory->CreateSwapChainForHwnd(renderer->d3d_device.Get(),
+			renderer->hwnd, &swapchain_desc, nullptr, nullptr, dxgi_swapchain_temp.GetAddressOf()));
 		WIN_CHECK(dxgi_factory->MakeWindowAssociation(renderer->hwnd, DXGI_MWA_NO_ALT_ENTER));
-		WIN_CHECK(dxgi_swapchain_temp->QueryInterface(__uuidof(IDXGISwapChain2), 
-					reinterpret_cast<void **>(&renderer->dxgi_swapchain)));
+		WIN_CHECK(dxgi_swapchain_temp.As(&renderer->dxgi_swapchain));
 
 		WIN_CHECK(renderer->dxgi_swapchain->SetMaximumFrameLatency(1));
 		renderer->swapchain_wait_handle = renderer->dxgi_swapchain->GetFrameLatencyWaitableObject();
 
-		SafeRelease(&dxgi_swapchain_temp);
-		SafeRelease(&dxgi_device);
-		SafeRelease(&dxgi_adapter);
-		SafeRelease(&dxgi_factory);
 	}
 
-	constexpr D2D1_BITMAP_PROPERTIES1 target_bitmap_properties {
-		.pixelFormat = D2D1_PIXEL_FORMAT {
-			.format = DXGI_FORMAT_B8G8R8A8_UNORM,
-			.alphaMode = D2D1_ALPHA_MODE_IGNORE
-		},
-		.dpiX = DEFAULT_DPI,
-		.dpiY = DEFAULT_DPI,
-		.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW
-	};
-	IDXGISurface2 *dxgi_backbuffer;
+	D2D1_BITMAP_PROPERTIES1 target_bitmap_properties {};
+	target_bitmap_properties.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE);
+	target_bitmap_properties.dpiX = DEFAULT_DPI;
+	target_bitmap_properties.dpiY = DEFAULT_DPI;
+	target_bitmap_properties.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+	ComPtr<IDXGISurface2> dxgi_backbuffer;
 	WIN_CHECK(renderer->dxgi_swapchain->GetBuffer(0, IID_PPV_ARGS(&dxgi_backbuffer)));
 	WIN_CHECK(renderer->d2d_context->CreateBitmapFromDxgiSurface(
-		dxgi_backbuffer,
+		dxgi_backbuffer.Get(),
 		&target_bitmap_properties,
-		&renderer->d2d_target_bitmap
+		renderer->d2d_target_bitmap.GetAddressOf()
 	));
 	renderer->d2d_context->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-
-	SafeRelease(&dxgi_backbuffer);
 }
 
 void HandleDeviceLost(Renderer *renderer) {
-	SafeRelease(&renderer->d3d_device);
-	SafeRelease(&renderer->d3d_context);
-	SafeRelease(&renderer->dxgi_swapchain);
-	SafeRelease(&renderer->d2d_factory);
-	SafeRelease(&renderer->d2d_device);
-	SafeRelease(&renderer->d2d_context);
-	SafeRelease(&renderer->d2d_target_bitmap);
-	SafeRelease(&renderer->d2d_background_rect_brush);
-	SafeRelease(&renderer->dwrite_factory);
-	SafeRelease(&renderer->dwrite_text_format);
-	delete renderer->glyph_renderer;
+	renderer->d3d_device.Reset();
+	renderer->d3d_context.Reset();
+	renderer->dxgi_swapchain.Reset();
+	renderer->d2d_factory.Reset();
+	renderer->d2d_device.Reset();
+	renderer->d2d_context.Reset();
+	renderer->d2d_target_bitmap.Reset();
+	renderer->d2d_background_rect_brush.Reset();
+	renderer->dwrite_factory.Reset();
+	renderer->dwrite_text_format.Reset();
+	renderer->dwrite_typography.Reset();
+	renderer->glyph_renderer.reset();
 
 	InitializeD2D(renderer);
 	InitializeD3D(renderer);
@@ -182,7 +174,7 @@ void RendererInitialize(Renderer *renderer, HWND hwnd, bool disable_ligatures, f
 	InitializeD2D(renderer);
 	InitializeD3D(renderer);
 	InitializeDWrite(renderer);
-	renderer->glyph_renderer = new GlyphRenderer(renderer);
+	renderer->glyph_renderer = std::make_unique<GlyphRenderer>(renderer);
 	RendererUpdateFont(renderer, DEFAULT_FONT_SIZE, DEFAULT_FONT, static_cast<int>(strlen(DEFAULT_FONT)));
 }
 
@@ -197,21 +189,21 @@ void RendererAttach(Renderer *renderer) {
 }
 
 void RendererShutdown(Renderer *renderer) {
-	SafeRelease(&renderer->d3d_device);
-	SafeRelease(&renderer->d3d_context);
-	SafeRelease(&renderer->dxgi_swapchain);
-	SafeRelease(&renderer->d2d_factory);
-	SafeRelease(&renderer->d2d_device);
-	SafeRelease(&renderer->d2d_context);
-	SafeRelease(&renderer->d2d_target_bitmap);
-	SafeRelease(&renderer->d2d_background_rect_brush);
-	SafeRelease(&renderer->dwrite_factory);
-	SafeRelease(&renderer->dwrite_text_format);
-	delete renderer->glyph_renderer;
-
-	free(renderer->grid_chars);
-	free(renderer->wchar_buffer);
-	free(renderer->grid_cell_properties);
+	renderer->d3d_device.Reset();
+	renderer->d3d_context.Reset();
+	renderer->dxgi_swapchain.Reset();
+	renderer->d2d_factory.Reset();
+	renderer->d2d_device.Reset();
+	renderer->d2d_context.Reset();
+	renderer->d2d_target_bitmap.Reset();
+	renderer->d2d_background_rect_brush.Reset();
+	renderer->dwrite_factory.Reset();
+	renderer->dwrite_text_format.Reset();
+	renderer->dwrite_typography.Reset();
+	renderer->glyph_renderer.reset();
+	renderer->grid_chars.reset();
+	renderer->wchar_buffer.reset();
+	renderer->grid_cell_properties.reset();
 }
 
 void RendererResize(Renderer *renderer, uint32_t width, uint32_t height) {
@@ -244,20 +236,19 @@ float GetTextWidth(Renderer *renderer, uint32_t *text, uint32_t length) {
 	ConvertToWide(renderer, text, length);
 
 	// Create dummy text format to hit test the width of the font
-	IDWriteTextLayout *test_text_layout = nullptr;
+	ComPtr<IDWriteTextLayout> test_text_layout;
 	WIN_CHECK(renderer->dwrite_factory->CreateTextLayout(
-		renderer->wchar_buffer,
+		renderer->wchar_buffer.get(),
 		renderer->wchar_buffer_length,
-		renderer->dwrite_text_format,
+		renderer->dwrite_text_format.Get(),
 		0.0f,
 		0.0f,
-		&test_text_layout
+		test_text_layout.GetAddressOf()
 	));
 
 	DWRITE_HIT_TEST_METRICS metrics;
 	float _;
 	WIN_CHECK(test_text_layout->HitTestTextPosition(0, 0, &_, &_, &metrics));
-	test_text_layout->Release();
 
 	return metrics.width;
 }
@@ -266,8 +257,8 @@ bool UpdateFontMetrics(Renderer *renderer, float font_size, const char* font_str
 	font_size = max(5.0f, min(font_size, 150.0f));
 	renderer->last_requested_font_size = font_size;
 
-	IDWriteFontCollection *font_collection;
-	WIN_CHECK(renderer->dwrite_factory->GetSystemFontCollection(&font_collection));
+	ComPtr<IDWriteFontCollection> font_collection;
+	WIN_CHECK(renderer->dwrite_factory->GetSystemFontCollection(font_collection.GetAddressOf()));
 
 	int wstrlen = MultiByteToWideChar(CP_UTF8, 0, font_string, strlen, 0, 0);
 	if (wstrlen != 0 && wstrlen < MAX_FONT_LENGTH) {
@@ -291,15 +282,16 @@ bool UpdateFontMetrics(Renderer *renderer, float font_size, const char* font_str
 		memcpy(renderer->font, renderer->fallback_font, (wcslen(renderer->fallback_font) + 1) * sizeof(wchar_t));
 	}
 
-	IDWriteFontFamily *font_family;
-	WIN_CHECK(font_collection->GetFontFamily(index, &font_family));
+	ComPtr<IDWriteFontFamily> font_family;
+	WIN_CHECK(font_collection->GetFontFamily(index, font_family.GetAddressOf()));
 
-	IDWriteFont *write_font;
-	WIN_CHECK(font_family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &write_font));
+	ComPtr<IDWriteFont> write_font;
+	WIN_CHECK(font_family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, write_font.GetAddressOf()));
 
-	IDWriteFontFace *font_face;
-	WIN_CHECK(write_font->CreateFontFace(&font_face));
-	WIN_CHECK(font_face->QueryInterface<IDWriteFontFace1>(&renderer->font_face));
+	ComPtr<IDWriteFontFace> font_face;
+	WIN_CHECK(write_font->CreateFontFace(font_face.GetAddressOf()));
+	renderer->font_face.Reset();
+	WIN_CHECK(font_face.As(&renderer->font_face));
 
 	renderer->font_face->GetMetrics(&renderer->font_metrics);
 
@@ -310,13 +302,13 @@ bool UpdateFontMetrics(Renderer *renderer, float font_size, const char* font_str
 	int32_t glyph_advance_in_em;
 	WIN_CHECK(renderer->font_face->GetDesignGlyphAdvances(1, &glyph_index, &glyph_advance_in_em));
 
-	IDWriteFont* write_font_bold;
-	WIN_CHECK(font_family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &write_font_bold));
+	ComPtr<IDWriteFont> write_font_bold;
+	WIN_CHECK(font_family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, write_font_bold.GetAddressOf()));
 
-	IDWriteFontFace* font_face_bold;
-	WIN_CHECK(write_font_bold->CreateFontFace(&font_face_bold));
-	IDWriteFontFace1* font_size_scale_bold1;
-	WIN_CHECK(font_face_bold->QueryInterface<IDWriteFontFace1>(&font_size_scale_bold1));
+	ComPtr<IDWriteFontFace> font_face_bold;
+	WIN_CHECK(write_font_bold->CreateFontFace(font_face_bold.GetAddressOf()));
+	ComPtr<IDWriteFontFace1> font_size_scale_bold1;
+	WIN_CHECK(font_face_bold.As(&font_size_scale_bold1));
 	DWRITE_FONT_METRICS1 font_metrics_bold;
 	font_size_scale_bold1->GetMetrics(&font_metrics_bold);
 
@@ -347,6 +339,7 @@ bool UpdateFontMetrics(Renderer *renderer, float font_size, const char* font_str
 	renderer->font_height = renderer->font_ascent + renderer->font_descent;
 	renderer->font_height *= renderer->linespace_factor;
 
+	renderer->dwrite_text_format.Reset();
 	WIN_CHECK(renderer->dwrite_factory->CreateTextFormat(
 		renderer->font,
 		nullptr,
@@ -355,28 +348,18 @@ bool UpdateFontMetrics(Renderer *renderer, float font_size, const char* font_str
 		DWRITE_FONT_STRETCH_NORMAL,
 		renderer->font_size,
 		L"en-us",
-		&renderer->dwrite_text_format
+		renderer->dwrite_text_format.GetAddressOf()
 	));
 
 	WIN_CHECK(renderer->dwrite_text_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, renderer->font_height, renderer->font_ascent * renderer->linespace_factor));
 	WIN_CHECK(renderer->dwrite_text_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR));
 	WIN_CHECK(renderer->dwrite_text_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP));
 
-	SafeRelease(&font_face);
-	SafeRelease(&font_face_bold);
-	SafeRelease(&write_font);
-	SafeRelease(&write_font_bold);
-
-	SafeRelease(&font_family);
-	SafeRelease(&font_collection);
-
 	return guifont_exists;
 }
 
 bool RendererUpdateFont(Renderer *renderer, float font_size, const char *font_string, int strlen) {
-	if (renderer->dwrite_text_format) {
-		renderer->dwrite_text_format->Release();
-	}
+	renderer->dwrite_text_format.Reset();
 
 	renderer->draws_invalidated = true;
 	return UpdateFontMetrics(renderer, font_size, font_string, strlen);
@@ -466,8 +449,8 @@ void ApplyHighlightAttributes(Renderer *renderer, HighlightAttributes *hl_attrib
 			CreateSpecialColor(renderer, hl_attribs)
 	);
 	DWRITE_TEXT_RANGE range {
-		.startPosition = static_cast<uint32_t>(start),
-		.length = static_cast<uint32_t>(end - start)
+		static_cast<uint32_t>(start),
+		static_cast<uint32_t>(end - start)
 	};
 	if (hl_attribs->flags & HL_ATTRIB_ITALIC) {
 		text_layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range);
@@ -493,7 +476,7 @@ void DrawBackgroundRect(Renderer *renderer, D2D1_RECT_F rect, HighlightAttribute
 	uint32_t color = CreateBackgroundColor(renderer, hl_attribs);
 	renderer->d2d_background_rect_brush->SetColor(D2D1::ColorF(color));
 
-	renderer->d2d_context->FillRectangle(rect, renderer->d2d_background_rect_brush);
+	renderer->d2d_context->FillRectangle(rect, renderer->d2d_background_rect_brush.Get());
 }
 
 D2D1_RECT_F GetCursorForegroundRect(Renderer *renderer, D2D1_RECT_F cursor_bg_rect) {
@@ -517,20 +500,19 @@ D2D1_RECT_F GetCursorForegroundRect(Renderer *renderer, D2D1_RECT_F cursor_bg_re
 void DrawHighlightedText(Renderer *renderer, D2D1_RECT_F rect, uint32_t *text, uint32_t length, HighlightAttributes *hl_attribs) {
 	ConvertToWide(renderer, text, length);
 
-	IDWriteTextLayout *text_layout = nullptr;
+	ComPtr<IDWriteTextLayout> text_layout;
 	WIN_CHECK(renderer->dwrite_factory->CreateTextLayout(
-		renderer->wchar_buffer,
+		renderer->wchar_buffer.get(),
 		renderer->wchar_buffer_length,
-		renderer->dwrite_text_format,
+		renderer->dwrite_text_format.Get(),
 		rect.right - rect.left,
 		rect.bottom - rect.top,
-		&text_layout
+		text_layout.GetAddressOf()
 	));
-	ApplyHighlightAttributes(renderer, hl_attribs, text_layout, 0, 1);
+	ApplyHighlightAttributes(renderer, hl_attribs, text_layout.Get(), 0, 1);
 
 	renderer->d2d_context->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_ALIASED);
-	text_layout->Draw(renderer, renderer->glyph_renderer, rect.left, rect.top);
-	text_layout->Release();
+	text_layout->Draw(renderer, renderer->glyph_renderer.get(), rect.left, rect.top);
 	renderer->d2d_context->PopAxisAlignedClip();
 }
 
@@ -538,26 +520,25 @@ void DrawGridLine(Renderer *renderer, int row) {
 	int base = row * renderer->grid_cols;
 
 	D2D1_RECT_F rect {
-		.left = 0.0f,
-		.top = row * renderer->font_height,
-		.right = renderer->grid_cols * renderer->font_width,
-		.bottom = (row * renderer->font_height) + renderer->font_height
+		0.0f,
+		row * renderer->font_height,
+		renderer->grid_cols * renderer->font_width,
+		(row * renderer->font_height) + renderer->font_height
 	};
 
-	IDWriteTextLayout *temp_text_layout = nullptr;
+	ComPtr<IDWriteTextLayout> temp_text_layout;
 	ConvertToWide(renderer, &renderer->grid_chars[base], renderer->grid_cols);
 	WIN_CHECK(renderer->dwrite_factory->CreateTextLayout(
-		renderer->wchar_buffer,
+		renderer->wchar_buffer.get(),
 		renderer->wchar_buffer_length,
-		renderer->dwrite_text_format,
+		renderer->dwrite_text_format.Get(),
 		rect.right - rect.left,
 		rect.bottom - rect.top,
-		&temp_text_layout
+		temp_text_layout.GetAddressOf()
 	));
     size_t grid_chars_length = renderer->wchar_buffer_length;
-	IDWriteTextLayout1 *text_layout;
-	temp_text_layout->QueryInterface<IDWriteTextLayout1>(&text_layout);
-	temp_text_layout->Release();
+	ComPtr<IDWriteTextLayout1> text_layout;
+	WIN_CHECK(temp_text_layout.As(&text_layout));
 
 	uint16_t hl_attrib_id = renderer->grid_cell_properties[base].hl_attrib_id;
 	int col_offset = 0;
@@ -568,7 +549,7 @@ void DrawGridLine(Renderer *renderer, int row) {
 		// Add spacing for wide chars
 		if (renderer->grid_cell_properties[base + i].is_wide_char) {
 			float char_width = GetTextWidth(renderer, &renderer->grid_chars[base + i], 2);
-			DWRITE_TEXT_RANGE range { .startPosition = static_cast<uint32_t>(i_wchars), .length = 1 };
+			DWRITE_TEXT_RANGE range { static_cast<uint32_t>(i_wchars), 1 };
 			text_layout->SetCharacterSpacing(0, (renderer->font_width * 2) - char_width, 0, range);
 		}
 
@@ -578,7 +559,7 @@ void DrawGridLine(Renderer *renderer, int row) {
 		else if(renderer->grid_chars[base + i] > 0xFF) {
 			float char_width = GetTextWidth(renderer, &renderer->grid_chars[base + i], 1);
 			if(abs(char_width - renderer->font_width) > 0.01f) {
-				DWRITE_TEXT_RANGE range { .startPosition = static_cast<uint32_t>(i_wchars), .length = 1 };
+				DWRITE_TEXT_RANGE range { static_cast<uint32_t>(i_wchars), 1 };
 				text_layout->SetCharacterSpacing(0, renderer->font_width - char_width, 0, range);
 			}
 		}
@@ -593,7 +574,7 @@ void DrawGridLine(Renderer *renderer, int row) {
 				float d_width = renderer->font_width - char_width;
 				if (d_width > 0)
 				{
-					DWRITE_TEXT_RANGE range{ .startPosition = static_cast<uint32_t>(i_wchars), .length = 1 };
+					DWRITE_TEXT_RANGE range { static_cast<uint32_t>(i_wchars), 1 };
 					text_layout->SetCharacterSpacing(d_width / 2, d_width / 2, 0, range);
 				}
 			}
@@ -603,13 +584,13 @@ void DrawGridLine(Renderer *renderer, int row) {
 		// if so draw until this point and continue with the new attributes
 		if (renderer->grid_cell_properties[base + i].hl_attrib_id != hl_attrib_id) {
 			D2D1_RECT_F bg_rect {
-				.left = col_offset * renderer->font_width,
-				.top = row * renderer->font_height,
-				.right = col_offset * renderer->font_width + renderer->font_width * (i - col_offset),
-				.bottom = (row * renderer->font_height) + renderer->font_height
+				col_offset * renderer->font_width,
+				row * renderer->font_height,
+				col_offset * renderer->font_width + renderer->font_width * (i - col_offset),
+				(row * renderer->font_height) + renderer->font_height
 			};
 			DrawBackgroundRect(renderer, bg_rect, &renderer->hl_attribs[hl_attrib_id]);
-			ApplyHighlightAttributes(renderer, &renderer->hl_attribs[hl_attrib_id], text_layout, col_offset_wchars, i_wchars);
+			ApplyHighlightAttributes(renderer, &renderer->hl_attribs[hl_attrib_id], text_layout.Get(), col_offset_wchars, i_wchars);
 
 			hl_attrib_id = renderer->grid_cell_properties[base + i].hl_attrib_id;
 			col_offset = i;
@@ -622,18 +603,15 @@ void DrawGridLine(Renderer *renderer, int row) {
 	D2D1_RECT_F last_rect = rect;
 	last_rect.left = col_offset * renderer->font_width;
 	DrawBackgroundRect(renderer, last_rect, &renderer->hl_attribs[hl_attrib_id]);
-	ApplyHighlightAttributes(renderer, &renderer->hl_attribs[hl_attrib_id], text_layout, col_offset_wchars, grid_chars_length);
+	ApplyHighlightAttributes(renderer, &renderer->hl_attribs[hl_attrib_id], text_layout.Get(), col_offset_wchars, grid_chars_length);
 
 	renderer->d2d_context->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_ALIASED);
 	if(renderer->disable_ligatures) {
-		text_layout->SetTypography(renderer->dwrite_typography, DWRITE_TEXT_RANGE { 
-			.startPosition = 0, 
-			.length = static_cast<uint32_t>(grid_chars_length)
-		});
+		DWRITE_TEXT_RANGE range { 0u, static_cast<uint32_t>(grid_chars_length) };
+		text_layout->SetTypography(renderer->dwrite_typography.Get(), range);
 	}
-	text_layout->Draw(renderer, renderer->glyph_renderer, 0.0f, rect.top);
+	text_layout->Draw(renderer, renderer->glyph_renderer.get(), 0.0f, rect.top);
 	renderer->d2d_context->PopAxisAlignedClip();
-	text_layout->Release();
 }
 
 void DrawAllGridLines(Renderer *renderer) {
@@ -775,10 +753,10 @@ void DrawCursor(Renderer *renderer) {
 	}
 
 	D2D1_RECT_F cursor_rect {
-		.left = renderer->cursor.col * renderer->font_width,
-		.top = renderer->cursor.row * renderer->font_height,
-		.right = renderer->cursor.col * renderer->font_width + renderer->font_width * double_width_char_factor,
-		.bottom = (renderer->cursor.row * renderer->font_height) + renderer->font_height
+		renderer->cursor.col * renderer->font_width,
+		renderer->cursor.row * renderer->font_height,
+		renderer->cursor.col * renderer->font_width + renderer->font_width * double_width_char_factor,
+		(renderer->cursor.row * renderer->font_height) + renderer->font_height
 	};
 	D2D1_RECT_F cursor_fg_rect = GetCursorForegroundRect(renderer, cursor_rect);
 	DrawBackgroundRect(renderer, cursor_fg_rect, &cursor_hl_attribs);
@@ -794,25 +772,24 @@ bool UpdateGridSize(Renderer *renderer, mpack_node_t grid_resize) {
 	int grid_cols = MPackIntFromArray(grid_resize_params, 1);
 	int grid_rows = MPackIntFromArray(grid_resize_params, 2);
 
-	if (renderer->grid_chars == nullptr ||
-		renderer->wchar_buffer == nullptr ||
-		renderer->grid_cell_properties == nullptr ||
+	if (!renderer->grid_chars ||
+		!renderer->wchar_buffer ||
+		!renderer->grid_cell_properties ||
 		renderer->grid_cols != grid_cols ||
 		renderer->grid_rows != grid_rows) {
 		
 		renderer->grid_cols = grid_cols;
 		renderer->grid_rows = grid_rows;
 
-		free(renderer->grid_chars);
-		renderer->grid_chars = static_cast<uint32_t *>(malloc(static_cast<size_t>(grid_cols) * grid_rows * sizeof(uint32_t)));
+		size_t grid_cell_count = static_cast<size_t>(grid_cols) * grid_rows;
+		renderer->grid_chars = std::unique_ptr<uint32_t[]>(new uint32_t[grid_cell_count]);
 		// Initialize all grid character to a space. An empty
 		// grid cell is equivalent to a space in a text layout
-		for (int i = 0; i < grid_cols * grid_rows; ++i) {
+		for (size_t i = 0; i < grid_cell_count; ++i) {
 			renderer->grid_chars[i] = L' ';
 		}
-		renderer->grid_cell_properties = static_cast<CellProperty *>(calloc(static_cast<size_t>(grid_cols) * grid_rows, sizeof(CellProperty)));
-		free(renderer->wchar_buffer);
-		renderer->wchar_buffer = static_cast<wchar_t *>(malloc(static_cast<size_t>(grid_cols * 2) * sizeof(wchar_t)));
+		renderer->grid_cell_properties = std::unique_ptr<CellProperty[]>(new CellProperty[grid_cell_count]());
+		renderer->wchar_buffer = std::unique_ptr<wchar_t[]>(new wchar_t[static_cast<size_t>(grid_cols) * 2]);
 
 		renderer->grid_initialized = true;
 		return true;
@@ -829,18 +806,14 @@ void UpdateCursorPos(Renderer *renderer, mpack_node_t cursor_goto) {
 
 void UpdateImePos(Renderer* renderer) {
 	HIMC input_context = ImmGetContext(renderer->hwnd);
-	COMPOSITIONFORM composition_form {
-		.dwStyle = CFS_POINT,
-		.ptCurrentPos = {
-			.x = static_cast<LONG>(renderer->cursor.col * renderer->font_width),
-			.y = static_cast<LONG>(renderer->cursor.row * renderer->font_height)
-		}
-	};
+	COMPOSITIONFORM composition_form {};
+	composition_form.dwStyle = CFS_POINT;
+	composition_form.ptCurrentPos.x = static_cast<LONG>(renderer->cursor.col * renderer->font_width);
+	composition_form.ptCurrentPos.y = static_cast<LONG>(renderer->cursor.row * renderer->font_height);
 
 	if (ImmSetCompositionWindow(input_context, &composition_form)) {
-		LOGFONTW font_attribs {
-			.lfHeight = static_cast<LONG>(renderer->font_height)
-		};
+		LOGFONTW font_attribs {};
+		font_attribs.lfHeight = static_cast<LONG>(renderer->font_height);
 		wcscpy_s(font_attribs.lfFaceName, LF_FACESIZE, renderer->font);
 		ImmSetCompositionFontW(input_context, &font_attribs);
 	}
@@ -980,20 +953,20 @@ void DrawBorderRectangles(Renderer *renderer) {
 
 	if(left_border != static_cast<float>(renderer->pixel_size.width)) {
 		D2D1_RECT_F vertical_rect {
-			.left = left_border,
-			.top = 0.0f,
-			.right = static_cast<float>(renderer->pixel_size.width),
-			.bottom = static_cast<float>(renderer->pixel_size.height)
+			left_border,
+			0.0f,
+			static_cast<float>(renderer->pixel_size.width),
+			static_cast<float>(renderer->pixel_size.height)
 		};
 		DrawBackgroundRect(renderer, vertical_rect, &renderer->hl_attribs[0]);
 	}
 
 	if(top_border != static_cast<float>(renderer->pixel_size.height)) {
 		D2D1_RECT_F horizontal_rect {
-			.left = 0.0f,
-			.top = top_border,
-			.right = static_cast<float>(renderer->pixel_size.width),
-			.bottom = static_cast<float>(renderer->pixel_size.height)
+			0.0f,
+			top_border,
+			static_cast<float>(renderer->pixel_size.width),
+			static_cast<float>(renderer->pixel_size.height)
 		};
 		DrawBackgroundRect(renderer, horizontal_rect, &renderer->hl_attribs[0]);
 	}
@@ -1061,12 +1034,12 @@ void ClearGrid(Renderer *renderer) {
 	for (int i = 0; i < renderer->grid_cols * renderer->grid_rows; ++i) {
 		renderer->grid_chars[i] = L' ';
 	}
-	memset(renderer->grid_cell_properties, 0, renderer->grid_cols * renderer->grid_rows * sizeof(CellProperty));
+	memset(renderer->grid_cell_properties.get(), 0, static_cast<size_t>(renderer->grid_cols) * renderer->grid_rows * sizeof(CellProperty));
 	D2D1_RECT_F rect {
-		.left = 0.0f,
-		.top = 0.0f,
-		.right = renderer->grid_cols * renderer->font_width,
-		.bottom = renderer->grid_rows * renderer->font_height
+		0.0f,
+		0.0f,
+		renderer->grid_cols * renderer->font_width,
+		renderer->grid_rows * renderer->font_height
 	};
 	DrawBackgroundRect(renderer, rect, &renderer->hl_attribs[0]);
 }
@@ -1079,7 +1052,7 @@ void StartDraw(Renderer *renderer) {
 			true
 		);
 
-		renderer->d2d_context->SetTarget(renderer->d2d_target_bitmap);
+		renderer->d2d_context->SetTarget(renderer->d2d_target_bitmap.Get());
 		renderer->d2d_context->BeginDraw();
 		renderer->d2d_context->SetTransform(D2D1::IdentityMatrix());
 		renderer->draw_active = true;
@@ -1087,14 +1060,11 @@ void StartDraw(Renderer *renderer) {
 }
 
 void CopyFrontToBack(Renderer *renderer) {
-	ID3D11Resource *front;
-	ID3D11Resource *back;
-	WIN_CHECK(renderer->dxgi_swapchain->GetBuffer(0, IID_PPV_ARGS(&back)));
-	WIN_CHECK(renderer->dxgi_swapchain->GetBuffer(1, IID_PPV_ARGS(&front)));
-	renderer->d3d_context->CopyResource(back, front);
-
-	SafeRelease(&front);
-	SafeRelease(&back);
+	ComPtr<ID3D11Resource> front;
+	ComPtr<ID3D11Resource> back;
+	WIN_CHECK(renderer->dxgi_swapchain->GetBuffer(0, IID_PPV_ARGS(back.GetAddressOf())));
+	WIN_CHECK(renderer->dxgi_swapchain->GetBuffer(1, IID_PPV_ARGS(front.GetAddressOf())));
+	renderer->d3d_context->CopyResource(back.Get(), front.Get());
 }
 
 void FinishDraw(Renderer *renderer) {
@@ -1208,21 +1178,21 @@ PixelSize RendererGridToPixelSize(Renderer *renderer, int rows, int cols) {
 	RECT adjusted_rect = { 0, 0, requested_width, requested_height };
 	AdjustWindowRect(&adjusted_rect, WS_OVERLAPPEDWINDOW, false);
 	return PixelSize {
-		.width = adjusted_rect.right - adjusted_rect.left,
-		.height = adjusted_rect.bottom - adjusted_rect.top
+		adjusted_rect.right - adjusted_rect.left,
+		adjusted_rect.bottom - adjusted_rect.top
 	};
 }
 
 GridSize RendererPixelsToGridSize(Renderer *renderer, int width, int height) {
 	return GridSize {
-		.rows = static_cast<int>(height / renderer->font_height),
-		.cols = static_cast<int>(width / renderer->font_width)
+		static_cast<int>(height / renderer->font_height),
+		static_cast<int>(width / renderer->font_width)
 	};
 }
 
 GridPoint RendererCursorToGridPoint(Renderer *renderer, int x, int y) {
 	return GridPoint {
-		.row = static_cast<int>(y / renderer->font_height),
-		.col = static_cast<int>(x / renderer->font_width)
+		static_cast<int>(y / renderer->font_height),
+		static_cast<int>(x / renderer->font_width)
 	};
 }

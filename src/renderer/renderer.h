@@ -1,5 +1,6 @@
 #pragma once
 #include <pch.h>
+#include "renderer/glyph_renderer.h"
 
 constexpr const char *DEFAULT_FONT = "Consolas";
 constexpr float DEFAULT_FONT_SIZE = 14.0f;
@@ -62,31 +63,32 @@ constexpr float DEFAULT_DPI = 96.0f;
 constexpr float POINTS_PER_INCH = 72.0f;
 struct GlyphDrawingEffect;
 struct GlyphRenderer;
+using Microsoft::WRL::ComPtr;
 struct Renderer {
 	CursorModeInfo cursor_mode_infos[MAX_CURSOR_MODE_INFOS];
 	Vec<HighlightAttributes> hl_attribs;
 	Cursor cursor;
 
-	GlyphRenderer *glyph_renderer;
+	std::unique_ptr<GlyphRenderer> glyph_renderer;
 
 	D3D_FEATURE_LEVEL d3d_feature_level;
-	ID3D11Device2 *d3d_device;
-	ID3D11DeviceContext2 *d3d_context;
-	IDXGISwapChain2 *dxgi_swapchain;
+	ComPtr<ID3D11Device2> d3d_device;
+	ComPtr<ID3D11DeviceContext2> d3d_context;
+	ComPtr<IDXGISwapChain2> dxgi_swapchain;
 	HANDLE swapchain_wait_handle;
-	ID2D1Factory5 *d2d_factory;
-	ID2D1Device4 *d2d_device;
-	ID2D1DeviceContext4 *d2d_context;
-	ID2D1Bitmap1 *d2d_target_bitmap;
-	ID2D1SolidColorBrush *d2d_background_rect_brush;
+	ComPtr<ID2D1Factory5> d2d_factory;
+	ComPtr<ID2D1Device4> d2d_device;
+	ComPtr<ID2D1DeviceContext4> d2d_context;
+	ComPtr<ID2D1Bitmap1> d2d_target_bitmap;
+	ComPtr<ID2D1SolidColorBrush> d2d_background_rect_brush;
 
-    IDWriteFontFace1 *font_face;
+    ComPtr<IDWriteFontFace1> font_face;
 
-	IDWriteFactory4 *dwrite_factory;
-	IDWriteTextFormat *dwrite_text_format;
+	ComPtr<IDWriteFactory4> dwrite_factory;
+	ComPtr<IDWriteTextFormat> dwrite_text_format;
 
 	bool disable_ligatures;
-	IDWriteTypography *dwrite_typography;
+	ComPtr<IDWriteTypography> dwrite_typography;
 
 	float linespace_factor;
 
@@ -106,10 +108,10 @@ struct Renderer {
 	bool grid_initialized;
 	int grid_rows;
 	int grid_cols;
-	uint32_t *grid_chars;
-	wchar_t *wchar_buffer;
+	std::unique_ptr<uint32_t[]> grid_chars;
+	std::unique_ptr<wchar_t[]> wchar_buffer;
 	size_t wchar_buffer_length;
-	CellProperty *grid_cell_properties;
+	std::unique_ptr<CellProperty[]> grid_cell_properties;
 
 	HWND hwnd;
 	bool draw_active;
